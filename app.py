@@ -34,7 +34,6 @@ Branding:
 
 from __future__ import annotations
 
-
 import sys
 import os
 import json
@@ -50,21 +49,36 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QIcon, QPalette, QColor, QFont
+from PySide6.QtGui import QAction, QIcon, QPalette, QColor, QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QMessageBox, QLabel,
     QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QCheckBox,
     QTextEdit, QSpacerItem, QSizePolicy, QFrame
 )
 
+# ----------------------------- Version & paths ------------------------------
+
+def resource_path(relative_path: str) -> str:
+    """Return absolute path to a bundled resource.
+
+    Works in dev (uses file dir) and in PyInstaller onefile/onedir builds
+    (uses the temporary _MEIPASS folder that PyInstaller extracts to).
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    return str(base / relative_path)
+
+
 def _read_version(default: str = "0.1.0") -> str:
     try:
-        v = Path("VERSION").read_text(encoding="utf-8").strip()
-        return v or default
+        vpath = Path(resource_path("VERSION"))
+        if vpath.exists():
+            v = vpath.read_text(encoding="utf-8").strip()
+            return v or default
     except Exception:
-        return default
+        pass
+    return default
 
-__version__ = _read_version("0.1.0")  # replaces hardcoded value
+__version__ = _read_version("0.1.0")
 
 APP_TITLE = "Cybear404 AutoCut Optimizer"
 DEFAULT_SHEET_NAME = "Grouped Cuts"
@@ -86,6 +100,7 @@ def parse_fraction_or_decimal(text: str) -> float:
     except Exception:
         raise ValueError("Invalid kerf format. Use decimal like 0.125 or fraction like 1/8.")
 
+
 def autosize_openpyxl_columns(ws) -> None:
     for col in ws.columns:
         max_length = 0
@@ -101,6 +116,7 @@ def autosize_openpyxl_columns(ws) -> None:
 Bins = List[List[float]]
 GroupedKey = Tuple[str, str, float]
 GroupedBins = Dict[GroupedKey, Bins]
+
 
 def bin_packing_grouped(df: pd.DataFrame, saw_width: float, *, allow_split_oversize: bool) -> Tuple[GroupedBins, List[dict]]:
     grouped_bins: GroupedBins = {}
@@ -160,6 +176,7 @@ def bin_packing_grouped(df: pd.DataFrame, saw_width: float, *, allow_split_overs
         grouped_bins[(label, str(material_type), float(max_len_val))] = bins
 
     return grouped_bins, issues
+
 
 def write_grouped_bins(file_path: str, grouped_bins: GroupedBins, *,
                        base_sheet_name: str = DEFAULT_SHEET_NAME,
@@ -230,6 +247,7 @@ def build_summary(grouped_bins: GroupedBins, kerf: float) -> pd.DataFrame:
         })
     return pd.DataFrame(rows).sort_values(["Material", "Stock Length"]) if rows else pd.DataFrame()
 
+
 def write_summary_sheet(wb_path: str, df_summary: pd.DataFrame) -> None:
     wb = load_workbook(wb_path)
     if "Summary" in wb.sheetnames:
@@ -241,6 +259,7 @@ def write_summary_sheet(wb_path: str, df_summary: pd.DataFrame) -> None:
             ws.append([row[c] for c in df_summary.columns])
     autosize_openpyxl_columns(ws)
     wb.save(wb_path)
+
 
 def write_validation_sheet(wb_path: str, grouped_bins: GroupedBins, kerf: float, df_summary: pd.DataFrame) -> None:
     feasible_violations = 0
@@ -268,6 +287,7 @@ def write_validation_sheet(wb_path: str, grouped_bins: GroupedBins, kerf: float,
     autosize_openpyxl_columns(ws)
     wb.save(wb_path)
 
+
 def write_waste_report_sheet(wb_path: str, grouped_bins: GroupedBins, kerf: float) -> None:
     wb = load_workbook(wb_path)
     if "Waste Report" in wb.sheetnames:
@@ -286,6 +306,7 @@ def write_waste_report_sheet(wb_path: str, grouped_bins: GroupedBins, kerf: floa
     autosize_openpyxl_columns(ws)
     wb.save(wb_path)
 
+
 def write_procurement_sheet(wb_path: str, df_summary: pd.DataFrame) -> None:
     if df_summary.empty:
         return
@@ -303,6 +324,7 @@ def write_procurement_sheet(wb_path: str, df_summary: pd.DataFrame) -> None:
         ws.append([row[c] for c in agg.columns])
     autosize_openpyxl_columns(ws)
     wb.save(wb_path)
+
 
 def write_issues_sheet(wb_path: str, issues: List[dict]) -> None:
     if not issues:
@@ -327,6 +349,7 @@ def load_settings() -> dict:
     except Exception:
         pass
     return {}
+
 
 def save_settings(data: dict) -> None:
     try:
@@ -353,6 +376,7 @@ def generate_sample_df(n: int = 50) -> pd.DataFrame:
             cut = round(random.uniform(L + 1, L + 40), 2)
         rows.append({"Cut Length": cut, "Max Length": L, "Material Type": mat})
     return pd.DataFrame(rows)
+
 
 def save_sample_workbook(path: str, n: int = 50) -> None:
     df = generate_sample_df(n)
@@ -408,12 +432,17 @@ class MainWindow(QMainWindow):
     def apply_light_theme(self) -> None:
         app = QApplication.instance()
         app.setStyle("Fusion")
-        app.setPalette(app.style().standardPalette())  # <- real light palette
+        app.setPalette(app.style().standardPalette())  # real light palette
         self._theme = "light"
         self._save_settings()
 
     # ---- UI ----
     def _setup_ui(self) -> None:
+        # Set window/app icon (in-app); exe icon comes from PyInstaller --icon
+        logo_png = resource_path("assets/logo.png")
+        if Path(logo_png).exists():
+            self.setWindowIcon(QIcon(logo_png))
+
         central = QWidget()
         self.setCentralWidget(central)
 
@@ -422,7 +451,7 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(12)
 
         # Branding header
-        header = self._make_header()
+        header = self._make_header(logo_png)
         main_layout.addWidget(header)
 
         # Form box
@@ -516,7 +545,7 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
-    def _make_header(self) -> QWidget:
+    def _make_header(self, logo_png: str) -> QWidget:
         header = QWidget()
         layout = QHBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -525,9 +554,10 @@ class MainWindow(QMainWindow):
         logo_label = QLabel()
         logo_label.setFixedHeight(48)
         logo_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        logo_path = os.path.join(os.getcwd(), "assets", "logo.png")
-        if os.path.exists(logo_path):
-            logo_label.setPixmap(QIcon(logo_path).pixmap(48, 48))
+        if Path(logo_png).exists():
+            pm = QPixmap(logo_png)
+            if not pm.isNull():
+                logo_label.setPixmap(pm.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             layout.addWidget(logo_label)
         else:
             brand = QLabel("CYBEAR404")
@@ -538,9 +568,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(brand)
 
         title = QLabel(APP_TITLE)
-        tfont = QFont()
-        tfont.setPointSize(16)
-        tfont.setBold(True)
+        tfont = QFont(); tfont.setPointSize(16); tfont.setBold(True)
         title.setFont(tfont)
 
         subtitle = QLabel("Optimize cut plans by stock length & material — with kerf.")
@@ -574,7 +602,8 @@ class MainWindow(QMainWindow):
 
     # ---- Actions ----
     def browse_excel(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select Excel workbook", os.getcwd(), "Excel Files (*.xlsx)")
+        start_dir = os.path.dirname(self.path_edit.text().strip()) or os.getcwd()
+        path, _ = QFileDialog.getOpenFileName(self, "Select Excel workbook", start_dir, "Excel Files (*.xlsx)")
         if path:
             self.path_edit.setText(path)
             self._save_settings()
@@ -769,6 +798,8 @@ class MainWindow(QMainWindow):
         self._save_settings()
         super().closeEvent(event)
 
+# ---------------------------- Template helper -------------------------------
+
 def create_template_here() -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     name = f"{TEMPLATE_BASENAME}_{ts}.xlsx"
@@ -787,9 +818,16 @@ def create_template_here() -> str:
     wb.close()
     return path
 
+# ---------------------------- Entry point -----------------------------------
+
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
+    # Also set app icon here (affects taskbar/dock in some environments)
+    logo_png = resource_path("assets/logo.png")
+    if Path(logo_png).exists():
+        app.setWindowIcon(QIcon(logo_png))
+
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
